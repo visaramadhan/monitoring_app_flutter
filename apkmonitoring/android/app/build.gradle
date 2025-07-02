@@ -1,0 +1,39 @@
+// File: android/app/build.gradle
+
+plugins {
+    id 'com.android.application'
+    id 'com.google.gms.google-services'
+}
+
+android {
+    namespace "com.PLTU.Pacitan"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.PLTU.Pacitan"
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+dependencies {
+    classpath 'com.android.tools.build:gradle:8.2.2'
+    classpath 'com.google.gms:google-services:4.4.0' // Firebase plugin
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.12.0'
+
+    // Firebase BOM + minimal satu modul Firebase (analytics)
+    implementation platform('com.google.firebase:firebase-bom:32.7.0')
+    implementation 'com.google.firebase:firebase-analytics'
+}
