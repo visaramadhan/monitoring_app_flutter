@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "597873472110",
+    "project_id": "pltu-pacitan",
+    "storage_bucket": "pltu-pacitan.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:597873472110:android:32008abb419fc95b096c7f",
+        "android_client_info": {
+          "package_name": "com.PLTU.Pacitan"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDpKOWgX-a201EZln4sP-HJIgbeeArApvs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
