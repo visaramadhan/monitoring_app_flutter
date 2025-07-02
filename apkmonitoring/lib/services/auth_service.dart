@@ -33,6 +33,11 @@ class AuthService {
       );
       
       if (credential.user != null) {
+        // Update last login
+        await _firestore.collection('users').doc(credential.user!.uid).update({
+          'lastLogin': FieldValue.serverTimestamp(),
+        });
+        
         return await getCurrentUserData();
       }
     } catch (e) {
@@ -49,6 +54,12 @@ class AuthService {
     String role = 'karyawan',
   }) async {
     try {
+      // Check if email already exists
+      final existingUser = await _checkEmailExists(email);
+      if (existingUser) {
+        throw Exception('Email sudah terdaftar');
+      }
+
       final credential = await _auth.createUserWithEmailAndPassword(
         email: email,
         password: password,
@@ -66,7 +77,12 @@ class AuthService {
         await _firestore
             .collection('users')
             .doc(credential.user!.uid)
-            .set(userData.toMap());
+            .set({
+          ...userData.toMap(),
+          'isActive': true,
+          'lastLogin': null,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
 
         return userData;
       }
@@ -77,11 +93,69 @@ class AuthService {
     return null;
   }
 
+  Future<bool> _checkEmailExists(String email) async {
+    try {
+      final querySnapshot = await _firestore
+          .collection('users')
+          .where('email', isEqualTo: email)
+          .get();
+      return querySnapshot.docs.isNotEmpty;
+    } catch (e) {
+      return false;
+    }
+  }
+
   Future<void> signOut() async {
     await _auth.signOut();
   }
 
   Future<void> sendPasswordResetEmail(String email) async {
     await _auth.sendPasswordResetEmail(email: email);
+  }
+
+  // Admin functions
+  Future<List<UserModel>> getAllUsers() async {
+    try {
+      final snapshot = await _firestore.collection('users').get();
+      return snapshot.docs
+          .map((doc) => UserModel.fromMap(doc.data(), doc.id))
+          .toList();
+    } catch (e) {
+      print('Error getting all users: $e');
+      return [];
+    }
+  }
+
+  Future<void> updateUserRole(String userId, String newRole) async {
+    try {
+      await _firestore.collection('users').doc(userId).update({
+        'role': newRole,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('Error updating user role: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> deleteUser(String userId) async {
+    try {
+      await _firestore.collection('users').doc(userId).delete();
+    } catch (e) {
+      print('Error deleting user: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> toggleUserStatus(String userId, bool isActive) async {
+    try {
+      await _firestore.collection('users').doc(userId).update({
+        'isActive': isActive,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('Error toggling user status: $e');
+      rethrow;
+    }
   }
 }

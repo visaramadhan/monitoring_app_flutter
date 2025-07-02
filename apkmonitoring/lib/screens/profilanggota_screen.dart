@@ -23,6 +23,29 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
   List<Map<String, dynamic>> anggotaList = [];
   UserModel? currentUser;
   bool isLoading = false;
+  String _selectedRole = 'karyawan';
+  String _searchQuery = '';
+
+  final List<Map<String, dynamic>> _roles = [
+    {
+      'value': 'karyawan',
+      'label': 'Karyawan',
+      'color': Colors.blue,
+      'icon': Icons.person,
+    },
+    {
+      'value': 'supervisor',
+      'label': 'Supervisor',
+      'color': Colors.orange,
+      'icon': Icons.supervisor_account,
+    },
+    {
+      'value': 'admin',
+      'label': 'Administrator',
+      'color': Colors.red,
+      'icon': Icons.admin_panel_settings,
+    },
+  ];
 
   @override
   void initState() {
@@ -64,11 +87,6 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
         final data = doc.data();
         final role = data['role'] ?? '';
         
-        // Skip supervisor dan admin dari pemeringkatan kinerja
-        if (role.toLowerCase() == 'supervisor' || role.toLowerCase() == 'admin') {
-          continue;
-        }
-        
         final username = (data['username'] ?? data['email']) ?? 'unknown';
         Map<String, dynamic> kinerjaData = await _hitungKinerja(doc.id);
 
@@ -77,6 +95,9 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
           'email': data['email'] ?? '',
           'username': username,
           'role': role,
+          'isActive': data['isActive'] ?? true,
+          'lastLogin': data['lastLogin'],
+          'createdAt': data['createdAt'],
           'kinerjaPercentage': kinerjaData['percentage'],
           'totalTactical': kinerjaData['totalTactical'],
           'totalNontactical': kinerjaData['totalNontactical'],
@@ -93,23 +114,29 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
         ),
       );
 
-      // Hitung peringkat berdasarkan kinerja
-      List<Map<String, dynamic>> sortedByKinerja = [...tempList];
-      sortedByKinerja.sort(
+      // Hitung peringkat berdasarkan kinerja (hanya untuk karyawan)
+      List<Map<String, dynamic>> karyawanList = tempList.where((user) => 
+        user['role'].toLowerCase() == 'karyawan').toList();
+      
+      karyawanList.sort(
         (a, b) => b['kinerjaPercentage'].compareTo(a['kinerjaPercentage']),
       );
       
-      // Assign peringkat
-      for (int i = 0; i < sortedByKinerja.length; i++) {
-        sortedByKinerja[i]['peringkat'] = i + 1;
+      // Assign peringkat untuk karyawan
+      for (int i = 0; i < karyawanList.length; i++) {
+        karyawanList[i]['peringkat'] = i + 1;
       }
 
       // Update peringkat di tempList
       for (var anggota in tempList) {
-        final match = sortedByKinerja.firstWhere(
-          (x) => x['uid'] == anggota['uid'],
-        );
-        anggota['peringkat'] = match['peringkat'];
+        if (anggota['role'].toLowerCase() == 'karyawan') {
+          final match = karyawanList.firstWhere(
+            (x) => x['uid'] == anggota['uid'],
+          );
+          anggota['peringkat'] = match['peringkat'];
+        } else {
+          anggota['peringkat'] = null; // Admin dan supervisor tidak ada peringkat
+        }
       }
 
       setState(() {
@@ -135,68 +162,74 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
       // Load tactical work orders
       final tacticalSnapshot = await FirebaseFirestore.instance
           .collection('tactical_work_orders')
-          .where('userId', isEqualTo: uid)
+          .doc('tactical')
           .get();
       
       // Load non-tactical work orders
       final nontacticalSnapshot = await FirebaseFirestore.instance
           .collection('nontactical_work_order')
-          .where('userId', isEqualTo: uid)
+          .doc('nontactical')
           .get();
 
-      int totalTactical = tacticalSnapshot.docs.length;
-      int totalNontactical = nontacticalSnapshot.docs.length;
-      
-      int closeTactical = tacticalSnapshot.docs
-          .where((doc) => doc.data()['status']?.toLowerCase() == 'close')
-          .length;
-      
-      int closeNontactical = nontacticalSnapshot.docs
-          .where((doc) => doc.data()['status']?.toLowerCase() == 'close')
-          .length;
+      int totalTactical = 0;
+      int totalNontactical = 0;
+      int closeTactical = 0;
+      int closeNontactical = 0;
+      List<Map<String, dynamic>> incompleteTasks = [];
+
+      // Process tactical work orders
+      if (tacticalSnapshot.exists) {
+        final tacticalData = tacticalSnapshot.data() as Map<String, dynamic>;
+        tacticalData.forEach((key, value) {
+          if (value is Map<String, dynamic> && value['userId'] == uid) {
+            totalTactical++;
+            if (value['status']?.toLowerCase() == 'close') {
+              closeTactical++;
+            } else {
+              incompleteTasks.add({
+                'id': key,
+                'title': value['wo'] ?? 'Tactical Task',
+                'status': value['status'] ?? 'open',
+                'type': 'Tactical',
+                'description': value['desc'] ?? '',
+                'category': value['category'] ?? '',
+                'pic': value['pic'] ?? '',
+                'no': value['no'] ?? 0,
+                'timestamp': value['timestamp'] ?? '',
+              });
+            }
+          }
+        });
+      }
+
+      // Process non-tactical work orders
+      if (nontacticalSnapshot.exists) {
+        final nontacticalData = nontacticalSnapshot.data() as Map<String, dynamic>;
+        nontacticalData.forEach((key, value) {
+          if (value is Map<String, dynamic> && value['userId'] == uid) {
+            totalNontactical++;
+            if (value['status']?.toLowerCase() == 'close') {
+              closeNontactical++;
+            } else {
+              incompleteTasks.add({
+                'id': key,
+                'title': value['wo'] ?? 'Non-Tactical Task',
+                'status': value['status'] ?? 'open',
+                'type': 'Non-Tactical',
+                'description': value['desc'] ?? '',
+                'category': value['category'] ?? '',
+                'pic': value['pic'] ?? '',
+                'no': value['no'] ?? 0,
+                'timestamp': value['timestamp'] ?? '',
+              });
+            }
+          }
+        });
+      }
       
       int totalClose = closeTactical + closeNontactical;
       int totalTugas = totalTactical + totalNontactical;
       double percentage = totalTugas > 0 ? (totalClose / totalTugas) * 100 : 0.0;
-
-      // Get incomplete tasks details
-      List<Map<String, dynamic>> incompleteTasks = [];
-      
-      // Add incomplete tactical tasks
-      for (var doc in tacticalSnapshot.docs) {
-        final data = doc.data();
-        if (data['status']?.toLowerCase() != 'close') {
-          incompleteTasks.add({
-            'id': doc.id,
-            'title': data['wo'] ?? 'Tactical Task',
-            'status': data['status'] ?? 'open',
-            'type': 'Tactical',
-            'description': data['desc'] ?? '',
-            'category': data['category'] ?? '',
-            'pic': data['pic'] ?? '',
-            'no': data['no'] ?? 0,
-            'timestamp': data['timestamp'] ?? '',
-          });
-        }
-      }
-      
-      // Add incomplete nontactical tasks
-      for (var doc in nontacticalSnapshot.docs) {
-        final data = doc.data();
-        if (data['status']?.toLowerCase() != 'close') {
-          incompleteTasks.add({
-            'id': doc.id,
-            'title': data['wo'] ?? 'Non-Tactical Task',
-            'status': data['status'] ?? 'open',
-            'type': 'Non-Tactical',
-            'description': data['desc'] ?? '',
-            'category': data['category'] ?? '',
-            'pic': data['pic'] ?? '',
-            'no': data['no'] ?? 0,
-            'timestamp': data['timestamp'] ?? '',
-          });
-        }
-      }
 
       return {
         'percentage': percentage,
@@ -267,20 +300,22 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
                           ),
                         ],
                       ),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text('Peringkat:', style: TextStyle(fontSize: 12)),
-                          Text(
-                            '#${anggotaData['peringkat']}',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: anggotaData['peringkat'] == 1 ? Colors.amber.shade700 : Colors.blue.shade700,
+                      if (anggotaData['peringkat'] != null) ...[
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('Peringkat:', style: TextStyle(fontSize: 12)),
+                            Text(
+                              '#${anggotaData['peringkat']}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: anggotaData['peringkat'] == 1 ? Colors.amber.shade700 : Colors.blue.shade700,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
+                          ],
+                        ),
+                      ],
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -489,7 +524,6 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
     if (_formKey.currentState!.validate()) {
       String email = _emailController.text.trim();
       String username = _usernameController.text.trim();
-      String role = 'karyawan';
 
       if (_isEmailExist(email)) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -519,8 +553,10 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
             .set({
               'email': email,
               'username': username,
-              'role': role,
+              'role': _selectedRole,
               'createdAt': Timestamp.now(),
+              'isActive': true,
+              'lastLogin': null,
             });
 
         await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
@@ -616,6 +652,46 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
     }
   }
 
+  void _toggleUserStatus(String uid, String username, bool currentStatus) async {
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({
+        'isActive': !currentStatus,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      
+      _loadAnggotaFromFirestore();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Status $username berhasil ${!currentStatus ? 'diaktifkan' : 'dinonaktifkan'}'),
+          backgroundColor: !currentStatus ? Colors.green : Colors.orange,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Gagal mengubah status: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  List<Map<String, dynamic>> get filteredAnggotaList {
+    if (_searchQuery.isEmpty) return anggotaList;
+    
+    return anggotaList.where((anggota) {
+      final username = anggota['username'].toString().toLowerCase();
+      final email = anggota['email'].toString().toLowerCase();
+      final role = anggota['role'].toString().toLowerCase();
+      final query = _searchQuery.toLowerCase();
+      
+      return username.contains(query) || 
+             email.contains(query) || 
+             role.contains(query);
+    }).toList();
+  }
+
   @override
   void dispose() {
     _emailController.dispose();
@@ -633,6 +709,13 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
         title: const Text('Pengaturan Profil Anggota'),
         backgroundColor: Colors.green.shade700,
         foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: Icon(Icons.refresh),
+            onPressed: _loadAnggotaFromFirestore,
+            tooltip: 'Refresh Data',
+          ),
+        ],
       ),
       endDrawer: AppDrawer(),
       body: Padding(
@@ -640,88 +723,146 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
         child: Column(
           children: [
             if (canManageUsers) ...[
-              Form(
-                key: _formKey,
-                child: Column(
-                  children: [
-                    TextFormField(
-                      controller: _emailController,
-                      decoration: const InputDecoration(
-                        hintText: 'Email Anggota',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.email),
-                      ),
-                      keyboardType: TextInputType.emailAddress,
-                      validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Email wajib diisi';
-                        }
-                        if (!value.contains('@') || !value.contains('.')) {
-                          return 'Format email tidak valid';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _usernameController,
-                      decoration: const InputDecoration(
-                        hintText: 'Username Anggota',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.person),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Username wajib diisi';
-                        }
-                        if (value.trim().length < 3) {
-                          return 'Username minimal 3 karakter';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: isLoading ? null : _buatAkunBaru,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        child: isLoading
-                            ? CircularProgressIndicator(color: Colors.white)
-                            : const Text('Buat Akun Karyawan'),
-                      ),
+              // Form untuk membuat akun baru
+              Container(
+                padding: EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 10,
+                      offset: Offset(0, 2),
                     ),
                   ],
+                ),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.person_add, color: Colors.green.shade700),
+                          SizedBox(width: 8),
+                          Text(
+                            'Buat Akun Baru',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.green.shade700,
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 16),
+                      
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              controller: _usernameController,
+                              decoration: const InputDecoration(
+                                labelText: 'Username',
+                                hintText: 'Username Anggota',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.person),
+                              ),
+                              validator: (value) {
+                                if (value == null || value.trim().isEmpty) {
+                                  return 'Username wajib diisi';
+                                }
+                                if (value.trim().length < 3) {
+                                  return 'Username minimal 3 karakter';
+                                }
+                                return null;
+                              },
+                            ),
+                          ),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: TextFormField(
+                              controller: _emailController,
+                              decoration: const InputDecoration(
+                                labelText: 'Email',
+                                hintText: 'Email Anggota',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.email),
+                              ),
+                              keyboardType: TextInputType.emailAddress,
+                              validator: (value) {
+                                if (value == null || value.trim().isEmpty) {
+                                  return 'Email wajib diisi';
+                                }
+                                if (!value.contains('@') || !value.contains('.')) {
+                                  return 'Format email tidak valid';
+                                }
+                                return null;
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                      
+                      SizedBox(height: 12),
+                      
+                      Row(
+                        children: [
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              value: _selectedRole,
+                              decoration: InputDecoration(
+                                labelText: 'Role',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.security),
+                              ),
+                              items: _roles.map((role) {
+                                return DropdownMenuItem<String>(
+                                  value: role['value'],
+                                  child: Row(
+                                    children: [
+                                      Icon(role['icon'], color: role['color'], size: 20),
+                                      SizedBox(width: 8),
+                                      Text(role['label']),
+                                    ],
+                                  ),
+                                );
+                              }).toList(),
+                              onChanged: (value) {
+                                setState(() {
+                                  _selectedRole = value!;
+                                });
+                              },
+                            ),
+                          ),
+                          SizedBox(width: 12),
+                          ElevatedButton.icon(
+                            onPressed: isLoading ? null : _buatAkunBaru,
+                            icon: isLoading 
+                                ? SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                  )
+                                : Icon(Icons.add),
+                            label: Text(isLoading ? 'Membuat...' : 'Buat Akun'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green.shade700,
+                              foregroundColor: Colors.white,
+                              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(height: 24),
             ],
             
-            if (anggotaList.isNotEmpty) ...[
-              Row(
-                children: [
-                  Icon(Icons.leaderboard, color: Colors.green.shade700),
-                  SizedBox(width: 8),
-                  Text(
-                    'Daftar Karyawan & Pemeringkatan Kinerja',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green.shade700,
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: 8),
-            ],
-            
+            // Tabel data anggota dengan scroll
             Expanded(
               child: isLoading
                   ? Center(child: CircularProgressIndicator())
@@ -737,7 +878,7 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
                               ),
                               SizedBox(height: 16),
                               Text(
-                                'Belum ada karyawan',
+                                'Belum ada anggota',
                                 style: TextStyle(
                                   fontSize: 16,
                                   color: Colors.grey[600],
@@ -746,7 +887,7 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
                               if (canManageUsers) ...[
                                 SizedBox(height: 8),
                                 Text(
-                                  'Tambahkan karyawan menggunakan form di atas',
+                                  'Tambahkan anggota menggunakan form di atas',
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: Colors.grey[500],
@@ -756,32 +897,54 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
                             ],
                           ),
                         )
-                      : ScrollableDataTable(
-                          headingRowColor: WidgetStateProperty.all(Color(0xFF4CAF50)),
+                      : EnhancedScrollableDataTable(
+                          title: 'Daftar Anggota & Pemeringkatan Kinerja',
+                          showSearch: true,
+                          onSearch: (query) {
+                            setState(() {
+                              _searchQuery = query;
+                            });
+                          },
+                          actions: [
+                            IconButton(
+                              icon: Icon(Icons.refresh),
+                              onPressed: _loadAnggotaFromFirestore,
+                              tooltip: 'Refresh',
+                            ),
+                          ],
+                          headingRowColor: MaterialStateProperty.all(Color(0xFF4CAF50)),
                           headingTextStyle: TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.w600,
                             fontSize: 12,
                           ),
-                          dataRowHeight: 72,
+                          dataRowHeight: 80,
                           columnSpacing: 12,
                           showCheckboxColumn: false,
                           columns: [
                             DataColumn(label: Text('No.')),
                             DataColumn(label: Text('Username')),
+                            DataColumn(label: Text('Email')),
+                            DataColumn(label: Text('Role')),
+                            DataColumn(label: Text('Status')),
                             DataColumn(label: Text('Kinerja (%)')),
-                            DataColumn(label: Text('Peringkat')),
                             if (canManageUsers) ...[
                               DataColumn(label: Text('Reset Password')),
+                              DataColumn(label: Text('Toggle Status')),
                               DataColumn(label: Text('Hapus Akun')),
                             ],
                           ],
-                          rows: List.generate(anggotaList.length, (index) {
-                            final anggota = anggotaList[index];
+                          rows: List.generate(filteredAnggotaList.length, (index) {
+                            final anggota = filteredAnggotaList[index];
                             final kinerjaPercentage = anggota['kinerjaPercentage'];
                             final incompleteTasks = anggota['incompleteTasks'] as List<Map<String, dynamic>>;
+                            final isActive = anggota['isActive'] ?? true;
                             
                             return DataRow(
+                              color: MaterialStateProperty.resolveWith<Color?>((states) {
+                                if (!isActive) return Colors.grey.shade100;
+                                return null;
+                              }),
                               cells: [
                                 DataCell(Text('${index + 1}')),
                                 DataCell(
@@ -791,125 +954,151 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
                                     children: [
                                       Text(
                                         anggota['username'],
-                                        style: TextStyle(fontWeight: FontWeight.w500),
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w500,
+                                          color: isActive ? Colors.black : Colors.grey,
+                                        ),
                                       ),
-                                      if (anggota['role'] != null && anggota['role'].isNotEmpty)
-                                        Text(
-                                          anggota['role'],
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            color: Colors.grey[600],
+                                      if (anggota['peringkat'] != null)
+                                        Container(
+                                          padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: anggota['peringkat'] == 1 
+                                                ? Colors.amber.shade100
+                                                : anggota['peringkat'] <= 3
+                                                    ? Colors.blue.shade100
+                                                    : Colors.grey.shade100,
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Text(
+                                            anggota['peringkat'] == 1 ? '🥇 #1' : '#${anggota['peringkat']}',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                              color: anggota['peringkat'] == 1 
+                                                  ? Colors.amber.shade700
+                                                  : anggota['peringkat'] <= 3
+                                                      ? Colors.blue.shade700
+                                                      : Colors.grey.shade700,
+                                            ),
                                           ),
                                         ),
                                     ],
                                   ),
                                 ),
                                 DataCell(
-                                  InkWell(
-                                    onTap: () => _showTaskDetails(
-                                      anggota['username'],
-                                      incompleteTasks,
-                                      kinerjaPercentage,
-                                      anggota,
+                                  Text(
+                                    anggota['email'],
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: isActive ? Colors.black : Colors.grey,
                                     ),
-                                    child: Container(
-                                      padding: EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 8,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: kinerjaPercentage >= 80 
-                                            ? Colors.green.shade100
-                                            : kinerjaPercentage >= 60
-                                                ? Colors.orange.shade100
-                                                : Colors.red.shade100,
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(
-                                          color: kinerjaPercentage >= 80 
-                                              ? Colors.green
-                                              : kinerjaPercentage >= 60
-                                                  ? Colors.orange
-                                                  : Colors.red,
-                                          width: 1,
-                                        ),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Text(
-                                            '${kinerjaPercentage.toStringAsFixed(1)}%',
-                                            style: TextStyle(
-                                              color: kinerjaPercentage >= 80 
-                                                  ? Colors.green.shade700
-                                                  : kinerjaPercentage >= 60
-                                                      ? Colors.orange.shade700
-                                                      : Colors.red.shade700,
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                          SizedBox(width: 4),
-                                          Icon(
-                                            Icons.info_outline,
-                                            size: 14,
-                                            color: kinerjaPercentage >= 80 
-                                                ? Colors.green.shade700
-                                                : kinerjaPercentage >= 60
-                                                    ? Colors.orange.shade700
-                                                    : Colors.red.shade700,
-                                          ),
-                                        ],
+                                  ),
+                                ),
+                                DataCell(
+                                  Container(
+                                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: _getRoleColor(anggota['role']).withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(color: _getRoleColor(anggota['role']).withOpacity(0.3)),
+                                    ),
+                                    child: Text(
+                                      _getRoleLabel(anggota['role']),
+                                      style: TextStyle(
+                                        color: _getRoleColor(anggota['role']),
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 11,
                                       ),
                                     ),
                                   ),
                                 ),
                                 DataCell(
                                   Container(
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 6,
-                                    ),
+                                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                     decoration: BoxDecoration(
-                                      color: anggota['peringkat'] == 1 
-                                          ? Colors.amber.shade100
-                                          : anggota['peringkat'] <= 3
-                                              ? Colors.blue.shade100
-                                              : Colors.grey.shade100,
+                                      color: isActive ? Colors.green.shade100 : Colors.red.shade100,
                                       borderRadius: BorderRadius.circular(12),
                                       border: Border.all(
-                                        color: anggota['peringkat'] == 1 
-                                            ? Colors.amber.shade300
-                                            : anggota['peringkat'] <= 3
-                                                ? Colors.blue.shade300
-                                                : Colors.grey.shade300,
+                                        color: isActive ? Colors.green.shade300 : Colors.red.shade300,
                                       ),
                                     ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        if (anggota['peringkat'] == 1)
-                                          Icon(
-                                            Icons.emoji_events,
-                                            size: 14,
-                                            color: Colors.amber.shade700,
-                                          ),
-                                        if (anggota['peringkat'] == 1)
-                                          SizedBox(width: 4),
-                                        Text(
-                                          '#${anggota['peringkat']}',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 12,
-                                            color: anggota['peringkat'] == 1 
-                                                ? Colors.amber.shade700
-                                                : anggota['peringkat'] <= 3
-                                                    ? Colors.blue.shade700
-                                                    : Colors.grey.shade700,
-                                          ),
-                                        ),
-                                      ],
+                                    child: Text(
+                                      isActive ? 'Aktif' : 'Nonaktif',
+                                      style: TextStyle(
+                                        color: isActive ? Colors.green.shade700 : Colors.red.shade700,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 11,
+                                      ),
                                     ),
                                   ),
+                                ),
+                                DataCell(
+                                  anggota['role'].toLowerCase() == 'karyawan'
+                                      ? InkWell(
+                                          onTap: () => _showTaskDetails(
+                                            anggota['username'],
+                                            incompleteTasks,
+                                            kinerjaPercentage,
+                                            anggota,
+                                          ),
+                                          child: Container(
+                                            padding: EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 8,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: kinerjaPercentage >= 80 
+                                                  ? Colors.green.shade100
+                                                  : kinerjaPercentage >= 60
+                                                      ? Colors.orange.shade100
+                                                      : Colors.red.shade100,
+                                              borderRadius: BorderRadius.circular(8),
+                                              border: Border.all(
+                                                color: kinerjaPercentage >= 80 
+                                                    ? Colors.green
+                                                    : kinerjaPercentage >= 60
+                                                        ? Colors.orange
+                                                        : Colors.red,
+                                                width: 1,
+                                              ),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Text(
+                                                  '${kinerjaPercentage.toStringAsFixed(1)}%',
+                                                  style: TextStyle(
+                                                    color: kinerjaPercentage >= 80 
+                                                        ? Colors.green.shade700
+                                                        : kinerjaPercentage >= 60
+                                                            ? Colors.orange.shade700
+                                                            : Colors.red.shade700,
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
+                                                SizedBox(width: 4),
+                                                Icon(
+                                                  Icons.info_outline,
+                                                  size: 14,
+                                                  color: kinerjaPercentage >= 80 
+                                                      ? Colors.green.shade700
+                                                      : kinerjaPercentage >= 60
+                                                          ? Colors.orange.shade700
+                                                          : Colors.red.shade700,
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        )
+                                      : Text(
+                                          '-',
+                                          style: TextStyle(
+                                            color: Colors.grey,
+                                            fontSize: 12,
+                                          ),
+                                        ),
                                 ),
                                 if (canManageUsers) ...[
                                   DataCell(
@@ -925,6 +1114,35 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
                                       ),
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: Colors.blue,
+                                        foregroundColor: Colors.white,
+                                        padding: EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 8,
+                                        ),
+                                        minimumSize: Size(0, 32),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  DataCell(
+                                    ElevatedButton.icon(
+                                      onPressed: () => _toggleUserStatus(
+                                        anggota['uid'],
+                                        anggota['username'],
+                                        isActive,
+                                      ),
+                                      icon: Icon(
+                                        isActive ? Icons.block : Icons.check_circle,
+                                        size: 16,
+                                      ),
+                                      label: Text(
+                                        isActive ? 'Nonaktif' : 'Aktifkan',
+                                        style: TextStyle(fontSize: 11),
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: isActive ? Colors.orange : Colors.green,
                                         foregroundColor: Colors.white,
                                         padding: EdgeInsets.symmetric(
                                           horizontal: 12,
@@ -972,5 +1190,31 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
         ),
       ),
     );
+  }
+
+  Color _getRoleColor(String role) {
+    switch (role.toLowerCase()) {
+      case 'admin':
+        return Colors.red;
+      case 'supervisor':
+        return Colors.orange;
+      case 'karyawan':
+        return Colors.blue;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  String _getRoleLabel(String role) {
+    switch (role.toLowerCase()) {
+      case 'admin':
+        return 'Administrator';
+      case 'supervisor':
+        return 'Supervisor';
+      case 'karyawan':
+        return 'Karyawan';
+      default:
+        return role;
+    }
   }
 }
