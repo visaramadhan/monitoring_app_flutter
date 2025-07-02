@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'drawer.dart';
+import '../widgets/scrollable_data_table.dart';
+import '../models/user_model.dart';
+import '../services/auth_service.dart';
 
 class AturProfilAnggotaPage extends StatefulWidget {
   const AturProfilAnggotaPage({super.key});
@@ -15,17 +18,26 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
   final _emailController = TextEditingController();
   final _usernameController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
+  final AuthService _authService = AuthService();
+  
   List<Map<String, dynamic>> anggotaList = [];
+  UserModel? currentUser;
+  bool isLoading = false;
 
   @override
   void initState() {
     super.initState();
+    _loadCurrentUser();
     _loadAnggotaFromFirestore();
   }
 
+  Future<void> _loadCurrentUser() async {
+    currentUser = await _authService.getCurrentUserData();
+    setState(() {});
+  }
+
   String generateRandomPassword(int length) {
-    const chars =
-        'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     Random random = Random();
     return List.generate(
       length,
@@ -40,9 +52,12 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
   }
 
   Future<void> _loadAnggotaFromFirestore() async {
+    setState(() {
+      isLoading = true;
+    });
+
     try {
-      final snapshot =
-          await FirebaseFirestore.instance.collection('users').get();
+      final snapshot = await FirebaseFirestore.instance.collection('users').get();
       List<Map<String, dynamic>> tempList = [];
 
       for (var doc in snapshot.docs) {
@@ -55,7 +70,6 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
         }
         
         final username = (data['username'] ?? data['email']) ?? 'unknown';
-
         Map<String, dynamic> kinerjaData = await _hitungKinerja(doc.id);
 
         tempList.add({
@@ -109,36 +123,37 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
           backgroundColor: Colors.red,
         ),
       );
+    } finally {
+      setState(() {
+        isLoading = false;
+      });
     }
   }
 
   Future<Map<String, dynamic>> _hitungKinerja(String uid) async {
     try {
-      // Menggunakan nama koleksi yang konsisten dengan database
-      final tacticalSnapshot =
-          await FirebaseFirestore.instance
-              .collection('tactical_work_orders') // Sesuaikan dengan nama koleksi yang benar
-              .where('userId', isEqualTo: uid)
-              .get();
+      // Load tactical work orders
+      final tacticalSnapshot = await FirebaseFirestore.instance
+          .collection('tactical_work_orders')
+          .where('userId', isEqualTo: uid)
+          .get();
       
-      final nontacticalSnapshot =
-          await FirebaseFirestore.instance
-              .collection('nontactical_work_order') // Sesuaikan dengan nama koleksi yang benar
-              .where('userId', isEqualTo: uid)
-              .get();
+      // Load non-tactical work orders
+      final nontacticalSnapshot = await FirebaseFirestore.instance
+          .collection('nontactical_work_order')
+          .where('userId', isEqualTo: uid)
+          .get();
 
       int totalTactical = tacticalSnapshot.docs.length;
       int totalNontactical = nontacticalSnapshot.docs.length;
       
-      int closeTactical =
-          tacticalSnapshot.docs
-              .where((doc) => doc.data()['status']?.toLowerCase() == 'close')
-              .length;
+      int closeTactical = tacticalSnapshot.docs
+          .where((doc) => doc.data()['status']?.toLowerCase() == 'close')
+          .length;
       
-      int closeNontactical =
-          nontacticalSnapshot.docs
-              .where((doc) => doc.data()['status']?.toLowerCase() == 'close')
-              .length;
+      int closeNontactical = nontacticalSnapshot.docs
+          .where((doc) => doc.data()['status']?.toLowerCase() == 'close')
+          .length;
       
       int totalClose = closeTactical + closeNontactical;
       int totalTugas = totalTactical + totalNontactical;
@@ -153,10 +168,10 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
         if (data['status']?.toLowerCase() != 'close') {
           incompleteTasks.add({
             'id': doc.id,
-            'title': data['wo'] ?? 'Tactical Task', // Menggunakan field 'wo' sebagai title
+            'title': data['wo'] ?? 'Tactical Task',
             'status': data['status'] ?? 'open',
             'type': 'Tactical',
-            'description': data['desc'] ?? '', // Menggunakan field 'desc'
+            'description': data['desc'] ?? '',
             'category': data['category'] ?? '',
             'pic': data['pic'] ?? '',
             'no': data['no'] ?? 0,
@@ -171,10 +186,10 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
         if (data['status']?.toLowerCase() != 'close') {
           incompleteTasks.add({
             'id': doc.id,
-            'title': data['wo'] ?? 'Non-Tactical Task', // Menggunakan field 'wo' sebagai title
+            'title': data['wo'] ?? 'Non-Tactical Task',
             'status': data['status'] ?? 'open',
             'type': 'Non-Tactical',
-            'description': data['desc'] ?? '', // Menggunakan field 'desc'
+            'description': data['desc'] ?? '',
             'category': data['category'] ?? '',
             'pic': data['pic'] ?? '',
             'no': data['no'] ?? 0,
@@ -204,7 +219,8 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
     }
   }
 
-  void _showTaskDetails(String username, List<Map<String, dynamic>> incompleteTasks, double kinerjaPercentage, Map<String, dynamic> anggotaData) {
+  void _showTaskDetails(String username, List<Map<String, dynamic>> incompleteTasks, 
+      double kinerjaPercentage, Map<String, dynamic> anggotaData) {
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -485,6 +501,10 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
         return;
       }
 
+      setState(() {
+        isLoading = true;
+      });
+
       try {
         String tempPassword = generateRandomPassword(8);
         UserCredential userCredential = await FirebaseAuth.instance
@@ -525,6 +545,10 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
             backgroundColor: Colors.red,
           ),
         );
+      } finally {
+        setState(() {
+          isLoading = false;
+        });
       }
     }
   }
@@ -601,6 +625,9 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Check if current user is admin or supervisor
+    bool canManageUsers = currentUser?.isAdmin == true || currentUser?.isSupervisor == true;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pengaturan Profil Anggota'),
@@ -612,66 +639,71 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            Form(
-              key: _formKey,
-              child: Column(
-                children: [
-                  TextFormField(
-                    controller: _emailController,
-                    decoration: const InputDecoration(
-                      hintText: 'Email Anggota',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.email),
-                    ),
-                    keyboardType: TextInputType.emailAddress,
-                    validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return 'Email wajib diisi';
-                      }
-                      if (!value.contains('@') || !value.contains('.')) {
-                        return 'Format email tidak valid';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _usernameController,
-                    decoration: const InputDecoration(
-                      hintText: 'Username Anggota',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.person),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return 'Username wajib diisi';
-                      }
-                      if (value.trim().length < 3) {
-                        return 'Username minimal 3 karakter';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _buatAkunBaru,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
+            if (canManageUsers) ...[
+              Form(
+                key: _formKey,
+                child: Column(
+                  children: [
+                    TextFormField(
+                      controller: _emailController,
+                      decoration: const InputDecoration(
+                        hintText: 'Email Anggota',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.email),
                       ),
-                      child: const Text('Buat Akun Karyawan'),
+                      keyboardType: TextInputType.emailAddress,
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Email wajib diisi';
+                        }
+                        if (!value.contains('@') || !value.contains('.')) {
+                          return 'Format email tidak valid';
+                        }
+                        return null;
+                      },
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _usernameController,
+                      decoration: const InputDecoration(
+                        hintText: 'Username Anggota',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.person),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Username wajib diisi';
+                        }
+                        if (value.trim().length < 3) {
+                          return 'Username minimal 3 karakter';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: isLoading ? null : _buatAkunBaru,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: isLoading
+                            ? CircularProgressIndicator(color: Colors.white)
+                            : const Text('Buat Akun Karyawan'),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 24),
+              const SizedBox(height: 24),
+            ],
+            
             if (anggotaList.isNotEmpty) ...[
               Row(
                 children: [
@@ -689,249 +721,252 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
               ),
               SizedBox(height: 8),
             ],
+            
             Expanded(
-              child: anggotaList.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.people_outline,
-                            size: 64,
-                            color: Colors.grey[400],
-                          ),
-                          SizedBox(height: 16),
-                          Text(
-                            'Belum ada karyawan',
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                          SizedBox(height: 8),
-                          Text(
-                            'Tambahkan karyawan menggunakan form di atas',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[500],
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  : SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: DataTable(
-                        headingRowColor: WidgetStateProperty.all(
-                          Color(0xFF4CAF50),
-                        ),
-                        headingTextStyle: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12,
-                        ),
-                        dataRowMinHeight: 56,
-                        dataRowMaxHeight: 72,
-                        columnSpacing: 12,
-                        horizontalMargin: 12,
-                        columns: [
-                          DataColumn(label: Text('No.')),
-                          DataColumn(label: Text('Username')),
-                          DataColumn(label: Text('Kinerja (%)')),
-                          DataColumn(label: Text('Peringkat')),
-                          DataColumn(label: Text('Reset Password')),
-                          DataColumn(label: Text('Hapus Akun')),
-                        ],
-                        rows: List.generate(anggotaList.length, (index) {
-                          final anggota = anggotaList[index];
-                          final kinerjaPercentage = anggota['kinerjaPercentage'];
-                          final incompleteTasks = anggota['incompleteTasks'] as List<Map<String, dynamic>>;
-                          
-                          return DataRow(
-                            cells: [
-                              DataCell(Text('${index + 1}')),
-                              DataCell(
-                                Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      anggota['username'],
-                                      style: TextStyle(fontWeight: FontWeight.w500),
-                                    ),
-                                    if (anggota['role'] != null && anggota['role'].isNotEmpty)
-                                      Text(
-                                        anggota['role'],
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          color: Colors.grey[600],
-                                        ),
-                                      ),
-                                  ],
+              child: isLoading
+                  ? Center(child: CircularProgressIndicator())
+                  : anggotaList.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.people_outline,
+                                size: 64,
+                                color: Colors.grey[400],
+                              ),
+                              SizedBox(height: 16),
+                              Text(
+                                'Belum ada karyawan',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: Colors.grey[600],
                                 ),
                               ),
-                              DataCell(
-                                InkWell(
-                                  onTap: () => _showTaskDetails(
-                                    anggota['username'],
-                                    incompleteTasks,
-                                    kinerjaPercentage,
-                                    anggota,
+                              if (canManageUsers) ...[
+                                SizedBox(height: 8),
+                                Text(
+                                  'Tambahkan karyawan menggunakan form di atas',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey[500],
                                   ),
-                                  child: Container(
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 8,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: kinerjaPercentage >= 80 
-                                          ? Colors.green.shade100
-                                          : kinerjaPercentage >= 60
-                                              ? Colors.orange.shade100
-                                              : Colors.red.shade100,
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(
-                                        color: kinerjaPercentage >= 80 
-                                            ? Colors.green
-                                            : kinerjaPercentage >= 60
-                                                ? Colors.orange
-                                                : Colors.red,
-                                        width: 1,
+                                ),
+                              ],
+                            ],
+                          ),
+                        )
+                      : ScrollableDataTable(
+                          headingRowColor: WidgetStateProperty.all(Color(0xFF4CAF50)),
+                          headingTextStyle: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 12,
+                          ),
+                          dataRowHeight: 72,
+                          columnSpacing: 12,
+                          showCheckboxColumn: false,
+                          columns: [
+                            DataColumn(label: Text('No.')),
+                            DataColumn(label: Text('Username')),
+                            DataColumn(label: Text('Kinerja (%)')),
+                            DataColumn(label: Text('Peringkat')),
+                            if (canManageUsers) ...[
+                              DataColumn(label: Text('Reset Password')),
+                              DataColumn(label: Text('Hapus Akun')),
+                            ],
+                          ],
+                          rows: List.generate(anggotaList.length, (index) {
+                            final anggota = anggotaList[index];
+                            final kinerjaPercentage = anggota['kinerjaPercentage'];
+                            final incompleteTasks = anggota['incompleteTasks'] as List<Map<String, dynamic>>;
+                            
+                            return DataRow(
+                              cells: [
+                                DataCell(Text('${index + 1}')),
+                                DataCell(
+                                  Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        anggota['username'],
+                                        style: TextStyle(fontWeight: FontWeight.w500),
                                       ),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
+                                      if (anggota['role'] != null && anggota['role'].isNotEmpty)
                                         Text(
-                                          '${kinerjaPercentage.toStringAsFixed(1)}%',
+                                          anggota['role'],
                                           style: TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.grey[600],
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                                DataCell(
+                                  InkWell(
+                                    onTap: () => _showTaskDetails(
+                                      anggota['username'],
+                                      incompleteTasks,
+                                      kinerjaPercentage,
+                                      anggota,
+                                    ),
+                                    child: Container(
+                                      padding: EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 8,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: kinerjaPercentage >= 80 
+                                            ? Colors.green.shade100
+                                            : kinerjaPercentage >= 60
+                                                ? Colors.orange.shade100
+                                                : Colors.red.shade100,
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(
+                                          color: kinerjaPercentage >= 80 
+                                              ? Colors.green
+                                              : kinerjaPercentage >= 60
+                                                  ? Colors.orange
+                                                  : Colors.red,
+                                          width: 1,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            '${kinerjaPercentage.toStringAsFixed(1)}%',
+                                            style: TextStyle(
+                                              color: kinerjaPercentage >= 80 
+                                                  ? Colors.green.shade700
+                                                  : kinerjaPercentage >= 60
+                                                      ? Colors.orange.shade700
+                                                      : Colors.red.shade700,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                          SizedBox(width: 4),
+                                          Icon(
+                                            Icons.info_outline,
+                                            size: 14,
                                             color: kinerjaPercentage >= 80 
                                                 ? Colors.green.shade700
                                                 : kinerjaPercentage >= 60
                                                     ? Colors.orange.shade700
                                                     : Colors.red.shade700,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                DataCell(
+                                  Container(
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: anggota['peringkat'] == 1 
+                                          ? Colors.amber.shade100
+                                          : anggota['peringkat'] <= 3
+                                              ? Colors.blue.shade100
+                                              : Colors.grey.shade100,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: anggota['peringkat'] == 1 
+                                            ? Colors.amber.shade300
+                                            : anggota['peringkat'] <= 3
+                                                ? Colors.blue.shade300
+                                                : Colors.grey.shade300,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        if (anggota['peringkat'] == 1)
+                                          Icon(
+                                            Icons.emoji_events,
+                                            size: 14,
+                                            color: Colors.amber.shade700,
+                                          ),
+                                        if (anggota['peringkat'] == 1)
+                                          SizedBox(width: 4),
+                                        Text(
+                                          '#${anggota['peringkat']}',
+                                          style: TextStyle(
                                             fontWeight: FontWeight.bold,
                                             fontSize: 12,
+                                            color: anggota['peringkat'] == 1 
+                                                ? Colors.amber.shade700
+                                                : anggota['peringkat'] <= 3
+                                                    ? Colors.blue.shade700
+                                                    : Colors.grey.shade700,
                                           ),
-                                        ),
-                                        SizedBox(width: 4),
-                                        Icon(
-                                          Icons.info_outline,
-                                          size: 14,
-                                          color: kinerjaPercentage >= 80 
-                                              ? Colors.green.shade700
-                                              : kinerjaPercentage >= 60
-                                                  ? Colors.orange.shade700
-                                                  : Colors.red.shade700,
                                         ),
                                       ],
                                     ),
                                   ),
                                 ),
-                              ),
-                              DataCell(
-                                Container(
-                                  padding: EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 6,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: anggota['peringkat'] == 1 
-                                        ? Colors.amber.shade100
-                                        : anggota['peringkat'] <= 3
-                                            ? Colors.blue.shade100
-                                            : Colors.grey.shade100,
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: anggota['peringkat'] == 1 
-                                          ? Colors.amber.shade300
-                                          : anggota['peringkat'] <= 3
-                                              ? Colors.blue.shade300
-                                              : Colors.grey.shade300,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      if (anggota['peringkat'] == 1)
-                                        Icon(
-                                          Icons.emoji_events,
-                                          size: 14,
-                                          color: Colors.amber.shade700,
+                                if (canManageUsers) ...[
+                                  DataCell(
+                                    ElevatedButton.icon(
+                                      onPressed: () => _resetPassword(
+                                        anggota['email'],
+                                        anggota['username'],
+                                      ),
+                                      icon: Icon(Icons.lock_reset, size: 16),
+                                      label: Text(
+                                        'Reset',
+                                        style: TextStyle(fontSize: 11),
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.blue,
+                                        foregroundColor: Colors.white,
+                                        padding: EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 8,
                                         ),
-                                      if (anggota['peringkat'] == 1)
-                                        SizedBox(width: 4),
-                                      Text(
-                                        '#${anggota['peringkat']}',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 12,
-                                          color: anggota['peringkat'] == 1 
-                                              ? Colors.amber.shade700
-                                              : anggota['peringkat'] <= 3
-                                                  ? Colors.blue.shade700
-                                                  : Colors.grey.shade700,
+                                        minimumSize: Size(0, 32),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(6),
                                         ),
                                       ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              DataCell(
-                                ElevatedButton.icon(
-                                  onPressed: () => _resetPassword(
-                                    anggota['email'],
-                                    anggota['username'],
-                                  ),
-                                  icon: Icon(Icons.lock_reset, size: 16),
-                                  label: Text(
-                                    'Reset',
-                                    style: TextStyle(fontSize: 11),
-                                  ),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.blue,
-                                    foregroundColor: Colors.white,
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 8,
-                                    ),
-                                    minimumSize: Size(0, 32),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(6),
                                     ),
                                   ),
-                                ),
-                              ),
-                              DataCell(
-                                ElevatedButton.icon(
-                                  onPressed: () => _hapusAkun(
-                                    anggota['uid'],
-                                    anggota['username'],
-                                  ),
-                                  icon: Icon(Icons.delete, size: 16),
-                                  label: Text(
-                                    'Hapus',
-                                    style: TextStyle(fontSize: 11),
-                                  ),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.red,
-                                    foregroundColor: Colors.white,
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 8,
+                                  DataCell(
+                                    ElevatedButton.icon(
+                                      onPressed: () => _hapusAkun(
+                                        anggota['uid'],
+                                        anggota['username'],
+                                      ),
+                                      icon: Icon(Icons.delete, size: 16),
+                                      label: Text(
+                                        'Hapus',
+                                        style: TextStyle(fontSize: 11),
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.red,
+                                        foregroundColor: Colors.white,
+                                        padding: EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 8,
+                                        ),
+                                        minimumSize: Size(0, 32),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                      ),
                                     ),
-                                    minimumSize: Size(0, 32),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
                                   ),
-                                ),
-                              ),
-                            ],
-                          );
-                        }),
-                      ),
-                    ),
+                                ],
+                              ],
+                            );
+                          }),
+                        ),
             ),
           ],
         ),
